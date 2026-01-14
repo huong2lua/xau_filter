@@ -20,6 +20,7 @@
   "homepage": "https://github.com/huong2lua/xau_filter#readme",
   "dependencies": {
     "dotenv": "^17.2.3",
-    "telegraf": "^4.16.3"
+    "telegraf": "^4.16.3",
+    "telegram": "^2.26.22"
   }
 }
