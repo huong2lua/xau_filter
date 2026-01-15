@@ -1,89 +1,129 @@
+const dotenv = require("dotenv");
 const { Telegraf } = require("telegraf");
 const { TelegramClient } = require("telegram");
 const { StringSession } = require("telegram/sessions");
-const dotenv = require("dotenv");
 
 dotenv.config();
 
-/* ================= USER ACCOUNT ================= */
+/* ================= ENV + CONFIG ================= */
+
+function mustEnv(name) {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing env: ${name}`);
+  return v;
+}
 
 const cfg = {
-  apiId: process.env.A_ID,
-  apiHash: process.env.A_HASH,
-  session: process.env.A_SS,
+  apiId: Number(mustEnv("A_ID")),
+  apiHash: mustEnv("A_HASH"),
+  session: mustEnv("A_SS"),
+  botToken: mustEnv("BOT_TOKEN"),
 };
-
-const myClient = new TelegramClient(
-  new StringSession(cfg.session),
-  Number(cfg.apiId),
-  cfg.apiHash,
-  { connectionRetries: 5 }
-);
-
-(async () => {
-  await myClient.connect();
-  console.log("👤 User account connected");
-})();
-
-/* ================= BOT ================= */
-
-const bot = new Telegraf(process.env.BOT_TOKEN);
 
 const CHANNEL_A = -1003256916567;
 const CHANNEL_B = -1003479291587;
 
-/* ================= PARSE ================= */
+/* ================= TELEGRAM CLIENTS ================= */
+
+const userClient = new TelegramClient(
+  new StringSession(cfg.session),
+  cfg.apiId,
+  cfg.apiHash,
+  { connectionRetries: 5 }
+);
+
+const bot = new Telegraf(cfg.botToken);
+
+/* ================= HELPERS ================= */
 
 function parseSignal(text = "") {
-  const tf = text.match(/\b(5m|15m)\b/i)?.[1]?.toLowerCase();
-  const side = text.match(/\b(BUY|SELL)\b/i)?.[1]?.toUpperCase();
+  const tf = text.match(/\b(5m|15m)\b/i)?.[1]?.toLowerCase() ?? null;
+  const side = text.match(/\b(BUY|SELL)\b/i)?.[1]?.toUpperCase() ?? null;
   return { tf, side };
 }
 
-/* ================= LISTEN ================= */
+function isFromChannel(msg, channelId) {
+  return msg?.chat?.id === channelId;
+}
+
+function getText(msg) {
+  return typeof msg?.text === "string" ? msg.text : "";
+}
+
+async function getPreviousMessageText(channelId, currentMessageId) {
+  const list = await userClient.getMessages(channelId, {
+    limit: 1,
+    offsetId: currentMessageId, // lấy message trước message_id này
+  });
+
+  const prev = list?.[0];
+  // gramjs message text có thể nằm ở `.message`
+  return typeof prev?.message === "string" ? prev.message : "";
+}
+
+async function safeForward(ctx, toChannelId, fromChannelId, messageId) {
+  await ctx.telegram.forwardMessage(toChannelId, fromChannelId, messageId);
+}
+
+/* ================= HANDLER ================= */
 
 bot.on("channel_post", async (ctx) => {
   const msg = ctx.channelPost;
 
-  if (msg.chat.id !== CHANNEL_A) return;
-  if (!msg.text) return;
+  // chỉ nghe CHANNEL_A
+  if (!isFromChannel(msg, CHANNEL_A)) return;
 
-  const current = parseSignal(msg.text);
+  const text = getText(msg);
+  if (!text) return;
+
+  const current = parseSignal(text);
   if (current.tf !== "15m" || !current.side) return;
 
   try {
-    // 👉 DÙNG USER ACCOUNT ĐỌC MESSAGE TRƯỚC ĐÓ
-    const prevMessages = await myClient.getMessages(CHANNEL_A, {
-      limit: 1,
-      offsetId: msg.message_id,
-    });
-
-    if (!prevMessages || prevMessages.length === 0) return;
-
-    const prevText = prevMessages[0].message;
+    const prevText = await getPreviousMessageText(CHANNEL_A, msg.message_id);
     if (!prevText) return;
 
     const prev = parseSignal(prevText);
 
-    if (prev.tf === "5m" && prev.side === current.side) {
-      // 👉 BOT forward
-      await ctx.telegram.forwardMessage(
-        CHANNEL_B,
-        CHANNEL_A,
-        msg.message_id
-      );
+    const isMatch = prev.tf === "5m" && prev.side === current.side;
+    if (!isMatch) return;
 
-      console.log(`🔥 Forwarded M15 ${current.side}`);
-    }
+    await safeForward(ctx, CHANNEL_B, CHANNEL_A, msg.message_id);
+    console.log(`🔥 Forwarded M15 ${current.side} | msgId=${msg.message_id}`);
   } catch (err) {
-    console.log("Error:", err.message);
+    console.error("Handler error:", err?.message || err);
   }
 });
 
-/* ================= START ================= */
+/* ================= START / STOP ================= */
 
-bot.launch();
-console.log("🤖 Bot is running...");
+async function start() {
+  await userClient.connect();
+  console.log("👤 User account connected");
 
-process.once("SIGINT", () => bot.stop("SIGINT"));
-process.once("SIGTERM", () => bot.stop("SIGTERM"));
+  bot.launch();
+  console.log("🤖 Bot is running...");
+}
+
+async function shutdown(signal) {
+  try {
+    console.log(`🛑 Shutting down (${signal})...`);
+    bot.stop(signal);
+    // gramjs có disconnect, nếu version bạn dùng có:
+    if (typeof userClient.disconnect === "function") {
+      await userClient.disconnect();
+    }
+  } catch (e) {
+    console.error("Shutdown error:", e?.message || e);
+  } finally {
+    process.exit(0);
+  }
+}
+
+start().catch((e) => {
+  console.error("Startup error:", e?.message || e);
+  process.exit(1);
+});
+
+process.once("SIGINT", () => shutdown("SIGINT"));
+process.once("SIGTERM", () => shutdown("SIGTERM"));
