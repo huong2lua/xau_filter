@@ -36,6 +36,7 @@ const bot = new Telegraf(cfg.botToken);
 
 /* ================= HELPERS ================= */
 
+// Parse only what you need: timeframe + side
 function parseSignal(text = "") {
   const tf = text.match(/\b(5m|15m)\b/i)?.[1]?.toLowerCase() ?? null;
   const side = text.match(/\b(BUY|SELL)\b/i)?.[1]?.toUpperCase() ?? null;
@@ -46,19 +47,41 @@ function isFromChannel(msg, channelId) {
   return msg?.chat?.id === channelId;
 }
 
+// IMPORTANT: support both text and caption (photo/video/document captions)
 function getText(msg) {
-  return typeof msg?.text === "string" ? msg.text : "";
+  if (typeof msg?.text === "string") return msg.text;
+  if (typeof msg?.caption === "string") return msg.caption;
+  return "";
 }
 
-async function getPreviousMessageText(channelId, currentMessageId) {
+/**
+ * Scan backward to find the nearest previous "5m" signal (ignore other TFs / noise).
+ * - offsetId = currentMessageId: fetch messages before current
+ * - lookback: how many previous messages to inspect
+ */
+async function getPrevious5mSignal(channelId, currentMessageId, lookback = 30) {
   const list = await userClient.getMessages(channelId, {
-    limit: 1,
-    offsetId: currentMessageId, // lấy message trước message_id này
+    limit: lookback,
+    offsetId: currentMessageId,
   });
 
-  const prev = list?.[0];
-  // gramjs message text có thể nằm ở `.message`
-  return typeof prev?.message === "string" ? prev.message : "";
+  for (const m of list || []) {
+    // gramjs message text is in `.message`
+    const t = typeof m?.message === "string" ? m.message : "";
+    if (!t) continue;
+
+    const p = parseSignal(t);
+    if (p.tf === "5m" && p.side) {
+      return {
+        tf: p.tf,
+        side: p.side,
+        text: t,
+        messageId: m.id,
+        date: m.date,
+      };
+    }
+  }
+  return null;
 }
 
 async function safeForward(ctx, toChannelId, fromChannelId, messageId) {
@@ -70,26 +93,30 @@ async function safeForward(ctx, toChannelId, fromChannelId, messageId) {
 bot.on("channel_post", async (ctx) => {
   const msg = ctx.channelPost;
 
-  // chỉ nghe CHANNEL_A
+  // only listen CHANNEL_A
   if (!isFromChannel(msg, CHANNEL_A)) return;
 
   const text = getText(msg);
   if (!text) return;
 
   const current = parseSignal(text);
+
+  // only process 15m signals that have BUY/SELL
   if (current.tf !== "15m" || !current.side) return;
 
   try {
-    const prevText = await getPreviousMessageText(CHANNEL_A, msg.message_id);
-    if (!prevText) return;
+    // NEW: find nearest previous 5m signal (skip 4h/others in between)
+    const prev5m = await getPrevious5mSignal(CHANNEL_A, msg.message_id, 2);
+    if (!prev5m) return;
 
-    const prev = parseSignal(prevText);
-
-    const isMatch = prev.tf === "5m" && prev.side === current.side;
+    const isMatch = prev5m.side === current.side;
     if (!isMatch) return;
 
     await safeForward(ctx, CHANNEL_B, CHANNEL_A, msg.message_id);
-    console.log(`🔥 Forwarded M15 ${current.side} | msgId=${msg.message_id}`);
+
+    console.log(
+      `🔥 Forwarded M15 ${current.side} | msgId=${msg.message_id} | matched prev5m msgId=${prev5m.messageId}`
+    );
   } catch (err) {
     console.error("Handler error:", err?.message || err);
   }
@@ -109,7 +136,7 @@ async function shutdown(signal) {
   try {
     console.log(`🛑 Shutting down (${signal})...`);
     bot.stop(signal);
-    // gramjs có disconnect, nếu version bạn dùng có:
+
     if (typeof userClient.disconnect === "function") {
       await userClient.disconnect();
     }
