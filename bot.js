@@ -3,6 +3,8 @@ const { Telegraf }       = require("telegraf");
 const { TelegramClient } = require("telegram");
 const { StringSession }  = require("telegram/sessions");
 const { NewMessage }     = require("telegram/events");
+const { EditedMessage }  = require("telegram/events");
+const { CustomFile } = require("telegram/client/uploads");
 
 dotenv.config();
 
@@ -23,6 +25,14 @@ const cfg = {
 
 const CHANNEL_A = -1003256916567;
 const CHANNEL_B = -1003479291587;
+
+// channel nguồn
+const SOURCE =
+-1001974948861;
+
+// chat đích
+const TARGET =
+-1002017769164;
 
 /* ================= TELEGRAM CLIENTS ================= */
 
@@ -183,27 +193,36 @@ async function messageEventHandler(event) {
     }
 }
 
-async function fwdSignal(params) {
+async function fwdSignal() {
   userClient.addEventHandler(async (event) => {
     try {
-      const idChannel = -1001974948861;
-      const hasEntity =
-          event &&
-          event._entities &&
-          event._entities.has(idChannel.toString());
-
-      const isUserMatch =
-          event &&
-          event.originalUpdate &&
-          event.originalUpdate.userId == idChannel;
-
-      if (hasEntity || isUserMatch) {
-          messageEventHandler(event);
-      }
+      let msg = event.message;
+      if (msg.editDate) return;
+      if (!msg) return;
+      if (msg.chatId != SOURCE) return;
+      let text = msg.message || "";
+      if (msg.media) {
+        await userClient.sendFile(TARGET, { file: msg.media, caption: text })
+      } else {
+        if (text) {
+          await userClient.sendMessage(TARGET, { message: text })
+        }      }
     } catch (error) {
-        console.error('Error in event handler:', error);
+      console.log(error);
     }
-  }, new NewMessage())
+  }, new NewMessage( {chats: [SOURCE]}));
+
+  userClient.addEventHandler(async (event) => {
+    try {
+      let msg = event.message;
+      if (!msg) return;
+      if (msg.chatId != SOURCE) return;
+      let text = "(edited)\n" + (msg.message || "");
+      await userClient.sendMessage(TARGET, { message: text })
+    } catch (error) {
+      console.log(error)
+    }
+  }, new EditedMessage( {chats: [SOURCE]}));
 }
 
 async function shutdown(signal) {
