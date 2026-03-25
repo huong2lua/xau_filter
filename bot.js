@@ -3,7 +3,7 @@ const { Telegraf }       = require("telegraf");
 const { TelegramClient } = require("telegram");
 const { StringSession }  = require("telegram/sessions");
 const { NewMessage }     = require("telegram/events");
-const { EditedMessage }  = require("telegram/events");
+const { EditedMessage }  = require("telegram/events/EditedMessage");
 const { CustomFile } = require("telegram/client/uploads");
 
 dotenv.config();
