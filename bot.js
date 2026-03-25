@@ -1,7 +1,8 @@
-const dotenv = require("dotenv");
-const { Telegraf } = require("telegraf");
+const dotenv             = require("dotenv");
+const { Telegraf }       = require("telegraf");
 const { TelegramClient } = require("telegram");
-const { StringSession } = require("telegram/sessions");
+const { StringSession }  = require("telegram/sessions");
+const { NewMessage }     = require("telegram/events");
 
 dotenv.config();
 
@@ -128,8 +129,81 @@ async function start() {
   await userClient.connect();
   console.log("👤 User account connected");
 
+  fwdSignal();
   bot.launch();
   console.log("🤖 Bot is running...");
+}
+
+async function printChatList() {
+    const dialogs = await userClient.getDialogs();
+
+    dialogs.forEach(dialog => {
+        const username =
+            dialog &&
+            dialog.entity &&
+            dialog.entity.username
+                ? dialog.entity.username
+                : '';
+
+        console.log(`${dialog.id} - ${dialog.name} - @${username}`);
+    });
+
+    process.exit(0);
+}
+
+async function messageEventHandler(event) {
+    try {
+
+      const msg = event.message;
+      if (!msg) return;
+
+      const message = msg.message;
+      if (!message) return;
+
+      let payload = { message };
+
+      if (msg.media) {
+          const fileData = await userClient.downloadMedia(msg);
+
+          if (msg.media.photo && fileData) {
+              payload.file = new CustomFile(
+                  'photo.jpg',
+                  fileData.length,
+                  '',
+                  fileData
+              );
+          }
+      }
+
+      // gui den mua day ban dinh
+      await userClient.sendMessage(-1002017769164, payload);
+
+    } catch (err) {
+        console.error('Handler error:', err);
+    }
+}
+
+async function fwdSignal(params) {
+  userClient.addEventHandler(async (event) => {
+    try {
+      const idChannel = -1001974948861;
+      const hasEntity =
+          event &&
+          event._entities &&
+          event._entities.has(idChannel.toString());
+
+      const isUserMatch =
+          event &&
+          event.originalUpdate &&
+          event.originalUpdate.userId == idChannel;
+
+      if (hasEntity || isUserMatch) {
+          messageEventHandler(event);
+      }
+    } catch (error) {
+        console.error('Error in event handler:', error);
+    }
+  }, new NewMessage())
 }
 
 async function shutdown(signal) {
