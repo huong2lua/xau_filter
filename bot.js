@@ -201,8 +201,59 @@ async function fwdSignal() {
       if (!msg) return;
       if (msg.chatId != SOURCE) return;
       let text = msg.message || "";
+
+      // ================= NEW: delay 10s + check + random reaction =================
+      setTimeout(async () => {
+        try {
+          // 👉 check đã có reaction chưa
+          let alreadyReacted = false;
+
+          if (msg.reactions && msg.reactions.results) {
+            for (const r of msg.reactions.results) {
+              // nếu là emoji reaction
+              if (r.chosen) {
+                alreadyReacted = true;
+                break;
+              }
+            }
+          }
+
+          if (alreadyReacted) {
+            console.log(`⏩ Already reacted msgId=${msg.id}`);
+            return;
+          }
+
+          // 👉 random emoji
+          const emojis = ["❤️", "🔥", "👍"];
+          const emoji = emojis[Math.floor(Math.random() * emojis.length)];
+
+          await userClient.sendReaction(
+            msg.chatId,
+            msg.id,
+            [{ type: "emoji", emoji }]
+          );
+
+          console.log(`💥 Reacted ${emoji} to msgId=${msg.id}`);
+        } catch (err) {
+          console.log("React error:", err.message);
+        }
+      }, 10000);
+      // ==========================================================================
+
       if (msg.media) {
-        await userClient.sendFile(TARGET, { file: msg.media, caption: text })
+        const downFile = await userClient.downloadMedia(msg);
+        if (msg.media.photo) {
+            await userClient.sendMessage(TARGET, {
+                message: text,
+                file: new CustomFile(
+                    "photo.jpg",
+                    downFile.length,
+                    "",
+                    downFile
+                )
+            });
+        }
+        // await userClient.sendFile(TARGET, { file: msg.media, caption: text })
       } else {
         if (text) {
           await userClient.sendMessage(TARGET, { message: text })
