@@ -139,7 +139,7 @@ async function start() {
   await userClient.connect();
   console.log("👤 User account connected");
 
-  fwdSignal();
+  // fwdSignal();
   bot.launch();
   console.log("🤖 Bot is running...");
 }
