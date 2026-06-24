@@ -45,6 +45,14 @@ const userClient = new TelegramClient(
 
 const bot = new Telegraf(cfg.botToken);
 
+bot.catch((err) => {
+    console.error("Telegraf error:", err);
+
+    setTimeout(() => {
+        process.exit(1);
+    }, 1000);
+});
+
 /* ================= HELPERS ================= */
 
 // Parse only what you need: timeframe + side
@@ -141,9 +149,7 @@ async function start() {
 
   // fwdSignal();
   bot.launch();
-  bot.telegram.getMe()
-  .then(me => console.log("Bot running:", me.username))
-  .catch(err => console.error("getMe startup error", err));
+  console.log("🤖 Bot is running...");
 }
 
 async function printChatList() {
