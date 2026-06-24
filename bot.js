@@ -141,7 +141,9 @@ async function start() {
 
   // fwdSignal();
   bot.launch();
-  console.log("🤖 Bot is running...");
+  bot.telegram.getMe()
+  .then(me => console.log("Bot running:", me.username))
+  .catch(err => console.error("getMe startup error", err));
 }
 
 async function printChatList() {
